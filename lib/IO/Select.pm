@@ -9,11 +9,33 @@ package IO::Select;
 use     strict;
 use warnings::register;
 use     vars qw($VERSION @ISA);
+use     Errno;
 require Exporter;
+
 
 $VERSION = "1.17";
 
 @ISA = qw(Exporter); # This is only so we can do version checking
+
+BEGIN {
+    eval 'use Time::HiRes qw(time);';
+}
+
+sub _select {
+    my $initial = time;
+    my $pending = $_[3];
+    my $nfound;
+
+    while () {
+        $nfound = CORE::select($_[0], $_[1], $_[2], $pending);
+        if ($nfound == -1 && $! == $!{EINTR}) {
+            redo if !$_[3] || ($pending = $_[3] - (time - $initial)) > 0;
+            $nfound = 0, $! = 0;
+        }
+        last;
+    }
+    return $nfound;
+}
 
 sub VEC_BITS () {0}
 sub FD_COUNT () {1}
@@ -102,7 +124,7 @@ sub can_read
  my $timeout = shift;
  my $r = $vec->[VEC_BITS];
 
- defined($r) && (select($r,undef,undef,$timeout) > 0)
+ defined($r) && (_select($r,undef,undef,$timeout) > 0)
     ? handles($vec, $r)
     : ();
 }
@@ -113,7 +135,7 @@ sub can_write
  my $timeout = shift;
  my $w = $vec->[VEC_BITS];
 
- defined($w) && (select(undef,$w,undef,$timeout) > 0)
+ defined($w) && (_select(undef,$w,undef,$timeout) > 0)
     ? handles($vec, $w)
     : ();
 }
@@ -124,7 +146,7 @@ sub has_exception
  my $timeout = shift;
  my $e = $vec->[VEC_BITS];
 
- defined($e) && (select(undef,undef,$e,$timeout) > 0)
+ defined($e) && (_select(undef,undef,$e,$timeout) > 0)
     ? handles($vec, $e)
     : ();
 }
@@ -188,7 +210,7 @@ sub select
  my $wb = defined $w ? $w->[VEC_BITS] : undef;
  my $eb = defined $e ? $e->[VEC_BITS] : undef;
 
- if(select($rb,$wb,$eb,$t) > 0)
+ if(_select($rb,$wb,$eb,$t) > 0)
   {
    my @r = ();
    my @w = ();
